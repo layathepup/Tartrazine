@@ -8,7 +8,10 @@ import numpy as np
 import scipy as sp
 
 from tabulate import tabulate
+from matplotlib import pyplot as plt
 from uncertainties.umath import *
+from uncertainties import ufloat as uf
+from pint import Quantity as Q_
 
 
 def Read(file_path: Path) -> csv.reader:
@@ -24,32 +27,50 @@ def Read(file_path: Path) -> csv.reader:
     return reader
 
 
+def pretty_print(table: [], title=None, numbered=False):
+    if numbered:
+        num = [i for i in range(1, len(table[0][1]) + 1)]
+        table.insert(0, ('#', num))
+    headers = [tup[0] for tup in table]
+    # create table of values as list of sublist of values
+    # than transpose to create list of rows
+    columns = [list(tup[1]) for tup in table]
+    rows = [list(column) for column in zip(*columns)]
+    print(title if title else '', '\n', tabulate(rows, headers=headers, tablefmt='grid'))
+
+
 def Flatten(super_list: list[list]):
     return [item for sub_list in super_list for item in sub_list]
 
 
 def min_transfer(total: int, parts: List[int]) -> List[int]:
+    parts.sort(reverse=True)
+    return min_transfer_recurse(total, parts)
+
+
+def min_transfer_recurse(total: int, parts: List[int]):
     """
     :param total:
     :param parts:
     :return:
     Given an integer total and an integer list of partitions,
     construct the minimum number of partitions that sum to the total as a list of integers.
-    Allow repeated partitions.
-    ex. construct 10 from [1,4,7] returns [4,4,1,1]
-    TODO: memoization for recursion
+    Allow repeated partitions. If multiple equal length partitions exist, return one with max part
+    ex. construct 10 from [7,4,1] returns [7,1,1,1] not [4,4,1,1]
+    shouldDO: memoization for recursion
     """
-    parts.sort(reverse=True)
+    if total == 0:
+        return [0]
     if len(parts) == 0:
         return None
     for i in range(len(parts)):
         if parts[i] == total:
             return [parts[i]]
         if parts[i] < total:
-            curr = min_transfer(total - parts[i], parts[i:])
+            curr = min_transfer_recurse(total - parts[i], parts[i:])
             if curr:
                 curr.append(parts[i])
-            next = min_transfer(total - parts[i], parts[i + 1:])
+            next = min_transfer_recurse(total - parts[i], parts[i + 1:])
             if next:
                 next.append(parts[i])
             if curr is None or next is None:
@@ -61,30 +82,29 @@ def min_transfer(total: int, parts: List[int]) -> List[int]:
 
 def ODR(x, y, x_dev, y_dev):
     model = sp.odr.Model(linear_model)
-    weights = lambda errs: [(1 / (err + max(errs) * 1e-10) ** 2) for err in errs]
-    y_weights = weights(y_dev)
-    x_weights = weights(x_dev)
+    weights = lambda vals, errs: [(1 / (err + max(vals) * 1e-10) ** 2) for err in errs]
+    y_weights = weights(y, y_dev)
+    x_weights = weights(x, x_dev)
     data = sp.odr.Data(x, y, we=y_weights, wd=x_weights)
     odr = sp.odr.ODR(data, model, beta0=[1., 0.])
-    return odr.run()
+    results = odr.run()
+    return uf(results.beta[0], results.sd_beta[0]), uf(results.beta[1], results.sd_beta[1])
 
 
 def linear_model(params, x):
     m, b = params
     return m * x + b
 
-
-def pretty_print(table: [], title=None, number=False):
-    if number:
-        num = [i for i in range(1, len(table[0][1]) + 1)]
-        table.insert(0, ('num', num))
-    headers = [tup[0] for tup in table]
-    # create table of values as list of sublist of values
-    # than transpose to create list of rows
-    columns = [list(tup[1]) for tup in table]
-    rows = [list(column) for column in zip(*columns)]
-    print(title if title else '', '\n', tabulate(rows, headers=headers, tablefmt='grid'))
-
+def ortho_residuals(x, y, m, b):
+    assert len(x) == len(y)
+    residuals = []
+    for x_i, y_i in zip(x, y):
+            x_proj, y_proj = (ortho_projection(x_i, y_i, m, b))
+            dist = points_distance(x_i, y_i, x_proj, y_proj)
+            if (y_i < y_proj):
+                dist *= -1
+            residuals.append((x_i, dist))
+    return residuals
 
 def ortho_projection(x, y, m, b):
     """
@@ -96,6 +116,10 @@ def ortho_projection(x, y, m, b):
     x_proj = (b1 - b) / (m - m1)
     y_proj = m * x_proj + b
     return x_proj, y_proj
+
+def points_distance(x0, y0, x1, y1):
+    dist = sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
+    return dist
 
 
 def points_distance(x0, y0, x1, y1):
@@ -235,3 +259,31 @@ def LOD(blanks):
 def LOQ(blanks):
     return np.mean(blanks) + 10 * np.std(blanks)
 
+
+def pretty_plot(x_plot, y_plot, x_err, y_err, residuals, title, m, b, x_label='', y_label=''):
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True, gridspec_kw={'height_ratios': [1, 2]})
+    fig.suptitle(title)
+
+    ax2.errorbar(x_plot, y_plot, xerr=x_err, yerr=y_err, fmt='o', c='black', markersize=2)
+    fit = lambda x: m.nominal_value * x + b.nominal_value
+    ax2.plot([min(x_plot), max(x_plot)], [fit(min(x_plot)), fit(max(x_plot))])
+    ax2.set_ylabel(y_label)
+    ax2.set_xlabel(x_label)
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['right'].set_visible(False)
+    mx = 1.2 * max(y_plot)
+    mx = np.ceil(mx * 10) / 10
+    ax2.set_ylim(0, mx)
+
+    ax1.scatter(residuals[:, 0], residuals[:, 1], c='black', s=3)
+    ax1.set_ylabel('Residual')
+    mx = 1.2 * max(residuals[:, 1])
+    mx = np.ceil(mx * 100) / 100
+    ax1.set_ylim(-mx, mx)
+    ax1.axhline(0, c='black', lw=1)
+    ax1.xaxis.set_visible(False)
+    for spine in ax1.spines.values():
+        spine.set_visible(False)
+    ax1.spines['left'].set_visible(True)
+
+    return fig
