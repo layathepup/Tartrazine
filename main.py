@@ -12,11 +12,15 @@ from util import *
 from data_loader import *
 
 
+tart_mm = 534.3 * ureg.g / ureg.mole
 
 stds_abs = np.empty(0)
-for std in stds_abs_raw:
-    abs = sum(std) / len(std)
-    stds_abs = np.append(stds_abs, abs)
+for trials in stds_abs_raw:
+    std = [t.magnitude.nominal_value for t in trials]
+    mean = np.mean(std)
+    dev = np.std(std, ddof=1)
+    std = Q_(mean).plus_minus(dev)
+    stds_abs = np.append(stds_abs, std)
 
 
 
@@ -27,7 +31,7 @@ stds_table = [
     #('T3 Abs', stds_abs_raw[:, 2]),
     ('Corrected Abs', stds_abs)
 ]
-pretty_print(stds_table, numbered=True)
+pretty_print(stds_table, numbered=0)
 
 stds_conc_repeated = np.array([[std] * 3 for std in stds_conc]).flatten()
 stds_abs_flattened = stds_abs_raw.flatten()
@@ -36,6 +40,8 @@ y_plot = [abs.magnitude.nominal_value for abs in stds_abs_flattened]
 x_err = [conc.magnitude.std_dev for conc in stds_conc_repeated]
 y_err = [abs.magnitude.std_dev for abs in stds_abs_flattened]
 m, b = ODR(x_plot, y_plot, x_err, y_err)
+y_fit = lambda y: (y - b.nominal_value) / m.nominal_value
+x_fit = lambda x: m.nominal_value * x + b.nominal_value
 
 residuals = ortho_residuals(x_plot, y_plot, m.nominal_value, b.nominal_value)
 residuals = np.array(residuals)
@@ -46,5 +52,22 @@ fig = pretty_plot(x_plot, y_plot, x_err, y_err, residuals,
 fig.savefig('abs.jpg')
 print(m, b)
 
-tart_mm = 534.3 * ureg.g / ureg.mole
-(m * tart_mm)
+unks_abs = [np.mean(sample) for sample in unks_abs_raw]
+unks_conc_raw = [[y_fit(a).magnitude.nominal_value for a in sample] for sample in unks_abs_raw]
+unks_conc = [np.mean(sample) for sample in unks_conc_raw]
+unks_conc_err = [cali_curve_unknown_error(m.nominal_value, x_plot, y_plot, sample, residuals)
+                for sample in unks_conc_raw]
+
+unks_table = [
+    ("Absorption", unks_abs),
+    ("Concentration / ppm", unks_conc),
+    ("Error / ppm", unks_conc_err)
+]
+pretty_print(unks_table, numbered=1)
+
+#LOD, LOQ
+blank_conc = y_fit(stds_abs[0])
+LOD = blank_conc.magnitude.nominal_value + 3 * blank_conc.magnitude.std_dev
+LOQ = blank_conc.magnitude.nominal_value + 10 * blank_conc.magnitude.std_dev
+print('LOD:', LOD, 'LOQ:', LOQ)
+pass

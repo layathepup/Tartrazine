@@ -27,9 +27,9 @@ def Read(file_path: Path) -> csv.reader:
     return reader
 
 
-def pretty_print(table: [], title=None, numbered=False):
-    if numbered:
-        num = [i for i in range(1, len(table[0][1]) + 1)]
+def pretty_print(table: [], title=None, numbered=None):
+    if numbered != None:
+        num = [i for i in range(numbered, len(table[0][1]) + numbered)]
         table.insert(0, ('#', num))
     headers = [tup[0] for tup in table]
     # create table of values as list of sublist of values
@@ -168,6 +168,7 @@ def std_add_curve_unknown_error(m, x, y, y_sample, residuals):
 
 
 def curve_uncertainty(residuals):
+    residuals = residuals[:,1]
     nom = sum([r ** 2 for r in residuals])
     denom = len(residuals) - 2
     return math.sqrt(nom / denom)

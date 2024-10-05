@@ -63,4 +63,16 @@ stds_abs_raw = stds_abs_raw[np.argsort(np.mean(stds_abs_raw, axis=1))]
 blank = np.mean(stds_abs_raw[0])
 stds_abs_raw = np.array([[a - blank.magnitude.nominal_value for a in trial] for trial in stds_abs_raw])
 
+unks_abs_raw = np.empty((0, 3))
+reader = Read(DAT / 'unknowns_absorbances.csv')
+for row in reader:
+    absorbs = []
+    for i in range(1, len(row), 2):
+        abs_raw, baseln = float(row[i]), float(row[i + 1])
+        abs = Q_((abs_raw - baseln) * ureg.dimensionless).plus_minus(0.005)
+        absorbs.append(abs)
+    unks_abs_raw = np.vstack([unks_abs_raw, absorbs])
+#unks_abs_raw = unks_abs_raw[np.argsort(np.mean(unks_abs_raw, axis=1))]
+unks_abs_raw = np.array([[a - blank.magnitude.nominal_value for a in trial] for trial in unks_abs_raw])
+
 pass
